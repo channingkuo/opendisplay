@@ -22,7 +22,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Power::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::w;
+use windows::core::{PCWSTR, w};
 
 use super::gpu::Presenter;
 use super::pointer;
@@ -157,11 +157,16 @@ pub fn create(
     unsafe {
         let hinstance = GetModuleHandleW(None)?;
         let class = w!("OpenDisplayReceiver");
+        // MAKEINTRESOURCE(1): the exe's icon resource (see build.rs).
+        #[allow(clippy::manual_dangling_ptr)]
+        let icon_id = PCWSTR(1 as *const u16);
         let wc = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: hinstance.into(),
             lpszClassName: class,
             hCursor: LoadCursorW(None, IDC_ARROW)?,
+            // The exe's embedded icon (resource id 1, see build.rs), if any.
+            hIcon: LoadIconW(Some(hinstance.into()), icon_id).unwrap_or_default(),
             hbrBackground: HBRUSH(GetStockObject(BLACK_BRUSH).0),
             style: CS_HREDRAW | CS_VREDRAW,
             ..Default::default()

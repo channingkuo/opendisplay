@@ -5,7 +5,6 @@ members = [
     "crates/opendisplay-session",
     "crates/od-fake-sender",
     "crates/od-receiver",
-    "crates/od-receiver-win",
     "crates/od-sender",
 ]
 
@@ -43,9 +42,6 @@ wayland-backend = "0.3"
 bitflags = "2"
 # KDE: KWin hands virtual outputs out as PipeWire streams.
 pipewire = "0.10"
-# Windows receiver: Win32 window, Media Foundation H.264 decode, Direct3D 11 present.
-windows = "0.62"
-png = "0.17"
 gstreamer = "0.25"
 gstreamer-app = "0.25"
 # Receiver window: GTK 4 presents the decoded frames (gtk4paintablesink,

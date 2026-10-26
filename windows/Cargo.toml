@@ -1,0 +1,58 @@
+[package]
+name = "od-receiver-win"
+description = "OpenDisplay Receiver for Windows: Media Foundation H.264 decode, Direct3D 11 presentation (PROTOCOL.md pv 3)."
+version = "1.28.0"
+edition = "2024"
+license = "GPL-3.0-only"
+repository = "https://github.com/peetzweg/opendisplay"
+rust-version = "1.85"
+build = "build.rs"
+
+# Cargo cannot name a binary with a space. `build.ps1` (and CI) copy the
+# result to `OpenDisplay Receiver.exe`, the Mac receiver's product name.
+[[bin]]
+name = "od-receiver-win"
+path = "src/main.rs"
+
+# A standalone crate: the Windows receiver is not part of the Linux workspace.
+# Network, session, Bonjour and stats code is shared with the Linux receiver
+# through its library (built without the GStreamer/GTK features).
+[dependencies]
+opendisplay-proto = { path = "../linux/crates/opendisplay-proto" }
+od-receiver = { path = "../linux/crates/od-receiver", default-features = false }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "fs", "signal", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+png = "0.17"
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_MediaFoundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Console",
+    "Win32_System_Power",
+    "Win32_System_Variant",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

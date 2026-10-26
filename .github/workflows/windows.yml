@@ -1,24 +1,25 @@
 name: Windows
 
-# The Windows receiver (linux/crates/od-receiver-win) needs the Windows SDK
-# APIs it wraps (Media Foundation, Direct3D 11), so it is built and linted on
-# a Windows runner. The portable parts also run in linux.yml's workspace test.
+# The Windows receiver (windows/) needs the Windows SDK APIs it wraps (Media
+# Foundation, Direct3D 11), so it is built and linted on a Windows runner. It
+# shares the network and session code of the Linux receiver (linux/crates).
 on:
   pull_request:
     paths:
-      - "linux/crates/od-receiver-win/**"
+      - "windows/**"
+      - "MacReceiver/Assets.xcassets/AppIcon.appiconset/**"
       - "linux/crates/od-receiver/**"
       - "linux/crates/opendisplay-proto/**"
       - "linux/crates/opendisplay-session/**"
-      - "linux/Cargo.*"
       - "PROTOCOL.md"
       - ".github/workflows/windows.yml"
   push:
     branches: [main]
     paths:
-      - "linux/crates/od-receiver-win/**"
+      - "windows/**"
       - "linux/crates/od-receiver/**"
-      - "linux/Cargo.*"
+      - "linux/crates/opendisplay-proto/**"
+      - "linux/crates/opendisplay-session/**"
       - ".github/workflows/windows.yml"
   workflow_dispatch:
 
@@ -36,31 +37,33 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: linux
+        working-directory: windows
     steps:
       - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: linux
+          workspaces: windows
 
-      # Only the receiver and the crates it uses: the workspace's Linux
-      # crates (GStreamer, PipeWire, Wayland) do not build here.
+      - name: Format
+        run: cargo fmt --check
+
       - name: Clippy
-        run: cargo clippy --locked -p od-receiver-win --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --locked -p od-receiver-win -p opendisplay-proto -p opendisplay-session
+        run: cargo test --locked
 
-      - name: Build
-        run: cargo build --locked --release -p od-receiver-win
+      - name: Build "OpenDisplay Receiver.exe"
+        run: ./build.ps1
+        shell: pwsh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: od-receiver-win-x86_64
-          path: linux/target/release/od-receiver-win.exe
+          name: OpenDisplay-Receiver-windows-x86_64
+          path: windows/dist/OpenDisplay Receiver.exe
           if-no-files-found: error

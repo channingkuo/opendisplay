@@ -1,8 +1,8 @@
-# OpenDisplay receiver for Windows (beta)
+# OpenDisplay Receiver for Windows (beta)
 
-`od-receiver-win.exe` turns a Windows PC's screen into an OpenDisplay display:
+`OpenDisplay Receiver.exe` turns a Windows PC's screen into an OpenDisplay display:
 a Mac (or a Linux desktop) extends onto it like onto an iPad. It speaks the
-same protocol as every other receiver ([PROTOCOL.md](../../../PROTOCOL.md)), so
+same protocol as every other receiver ([PROTOCOL.md](../PROTOCOL.md)), so
 the Mac sender needs no change: the PC shows up in its receiver list.
 
 It is one self-contained `.exe`: a Win32 window, the **Microsoft H.264 decoder
@@ -10,6 +10,12 @@ through Media Foundation** (on the GPU via DXVA when the driver supports it,
 otherwise on the CPU) and **Direct3D 11** for scaling and colour conversion.
 No GStreamer, no codec pack, no runtime to install. Like the sender, the
 stream is **not encrypted**: use it on a network you trust.
+
+The exe has the Mac receiver's name and app icon. It is a GUI program: started
+from Explorer it opens no console and writes its log to
+`%LOCALAPPDATA%\opendisplay\receiver.log` (a fatal error also shows in a
+message box); started from a terminal it prints the log there, so
+`--help`, `--list-monitors` and `set RUST_LOG=debug` work as usual.
 
 > **Status:** written against the protocol and the Windows APIs and checked on
 > CI for build and lint, but it has had little time on real hardware. Reports
@@ -25,7 +31,7 @@ stream is **not encrypted**: use it on a network you trust.
 
 ## Use
 
-1. Run `od-receiver-win.exe` from a terminal (or double-click it). It covers the
+1. Double-click `OpenDisplay Receiver.exe` (no console window opens). It covers the
    primary monitor with a black window and advertises itself over Bonjour.
 2. Allow it through the **Windows Firewall** on private networks when asked
    (see below).
@@ -38,13 +44,13 @@ Keys: **F11** or **Alt+Enter** toggles fullscreen, **Esc** leaves fullscreen,
 **Alt+F4** or closing the window quits (the sender is told).
 
 ```
-od-receiver-win.exe --list-monitors        # what Windows reports
-od-receiver-win.exe --monitor 2            # cover the second monitor (or --monitor \\.\DISPLAY2)
-od-receiver-win.exe --windowed             # a normal window instead of fullscreen
-od-receiver-win.exe --software-decode      # never use the GPU decoder
-od-receiver-win.exe --name "Desk PC"       # name shown in the sender's list
-od-receiver-win.exe --listen 0.0.0.0:9000  # port (the cursor channel uses port+1)
-od-receiver-win.exe --width 2560 --height 1440 --scale 1.5 --refresh 144   # override the panel facts
+"OpenDisplay Receiver.exe" --list-monitors        # what Windows reports
+"OpenDisplay Receiver.exe" --monitor 2            # cover the second monitor (or --monitor \\.\DISPLAY2)
+"OpenDisplay Receiver.exe" --windowed             # a normal window instead of fullscreen
+"OpenDisplay Receiver.exe" --software-decode      # never use the GPU decoder
+"OpenDisplay Receiver.exe" --name "Desk PC"       # name shown in the sender's list
+"OpenDisplay Receiver.exe" --listen 0.0.0.0:9000  # port (the cursor channel uses port+1)
+"OpenDisplay Receiver.exe" --width 2560 --height 1440 --scale 1.5 --refresh 144   # override the panel facts
 ```
 
 If the Mac cannot see the PC (guest networks and some routers block mDNS), run
@@ -79,14 +85,22 @@ the optional HEVC video extension and is not used.
 
 ## Build
 
+Needs Rust (MSVC toolchain) and the Windows SDK (Visual Studio Build Tools, for
+`rc.exe`, which embeds the icon).
+
 ```
-cd linux
-cargo build --release -p od-receiver-win     # target\release\od-receiver-win.exe
+cd windows
+.\build.ps1                  # dist\OpenDisplay Receiver.exe
+cargo build --release        # the same binary, as target\release\od-receiver-win.exe
 ```
 
-Needs Rust (MSVC toolchain). The portable parts (`hello` construction, cursor
-sprite scaling) are unit-tested on every platform; `cargo check --target
-x86_64-pc-windows-msvc -p od-receiver-win` works from Linux and macOS too.
+Cargo cannot name a binary with a space, so `build.ps1` copies it to the
+Mac receiver's name. The icon is `assets\OpenDisplay Receiver.ico`, made from
+`MacReceiver/Assets.xcassets/AppIcon.appiconset`. This crate is separate from
+the Linux workspace; it reuses `linux/crates/od-receiver` (built without
+GStreamer/GTK) for the network and session code. The portable parts (`hello`
+construction, cursor sprite scaling) are unit-tested on every platform, and
+`cargo check --target x86_64-pc-windows-msvc` works from Linux and macOS too.
 
 ## Known limits
 

@@ -311,11 +311,12 @@ Reports go to [#284](https://github.com/peetzweg/opendisplay/issues/284).
 
 ### Windows receiver (beta)
 
-`od-receiver-win.exe` turns a Windows PC's screen into the display for a Mac
-sender, as a single `.exe` (Media Foundation H.264 decode on the GPU, Direct3D 11
-presentation, no codecs to install). It shares its network and protocol
+`OpenDisplay Receiver.exe` turns a Windows PC's screen into the display for a
+Mac sender, as a single file (Media Foundation H.264 decode on the GPU, Direct3D 11
+presentation, no codecs to install), with the same name and icon as the Mac
+receiver. It lives in [windows/](windows/) and shares its network and protocol
 code with the Linux receiver. Build, firewall and usage notes:
-[linux/crates/od-receiver-win/README.md](linux/crates/od-receiver-win/README.md).
+[windows/README.md](windows/README.md).
 
 ## Third-party projects
 

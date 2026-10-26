@@ -1,4 +1,7 @@
 #![cfg_attr(not(windows), allow(dead_code))]
+// A GUI program: no console window when started from Explorer. A terminal
+// it was started from is attached again in `app::main`.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 //! OpenDisplay receiver for Windows: turns a Windows PC's screen into an
 //! OpenDisplay display (PROTOCOL.md pv 3). The network, session and Bonjour
@@ -17,8 +20,8 @@ fn main() {
 }
 
 #[cfg(windows)]
-fn main() -> anyhow::Result<()> {
-    app::main()
+fn main() {
+    app::run();
 }
 
 #[cfg(windows)]
@@ -38,7 +41,7 @@ mod app {
 
     /// OpenDisplay receiver for Windows.
     #[derive(Parser, Debug)]
-    #[command(version, about)]
+    #[command(name = "OpenDisplay Receiver", version, about)]
     struct Args {
         /// TCP listen address (§1: the receiver listens).
         #[arg(long, default_value = "0.0.0.0:9000")]
@@ -83,17 +86,105 @@ mod app {
         stats_every: f64,
     }
 
-    pub fn main() -> Result<()> {
+    /// Entry point: attach to the launching terminal (or log to a file when
+    /// started from Explorer), run, and show a fatal error where the user can
+    /// see it.
+    pub fn run() {
+        let console = attach_console();
+        let to_file = !console && !has_stdout();
+        let log_path = init_logging(to_file);
+        if let Err(e) = main() {
+            tracing::error!("{e:#}");
+            if to_file || !console {
+                let mut text = format!("{e:#}");
+                if let Some(p) = &log_path {
+                    text.push_str(&format!("\n\nLog: {}", p.display()));
+                }
+                message_box(&text);
+            }
+            std::process::exit(1);
+        }
+    }
+
+    /// A GUI-subsystem process has no console; show the parent's, if any, so
+    /// `od-receiver-win --help` and the logs appear in the terminal it was
+    /// started from.
+    fn attach_console() -> bool {
+        use std::os::windows::io::IntoRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Console::*;
+        unsafe {
+            if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+                return false;
+            }
+            for id in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+                // Keep a redirect (`> log.txt`) if there is one.
+                if GetStdHandle(id).map(|h| !h.is_invalid()).unwrap_or(false) {
+                    continue;
+                }
+                if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+                    let _ = SetStdHandle(id, HANDLE(f.into_raw_handle()));
+                }
+            }
+        }
+        true
+    }
+
+    fn has_stdout() -> bool {
+        use windows::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
+        unsafe {
+            GetStdHandle(STD_OUTPUT_HANDLE)
+                .map(|h| !h.is_invalid())
+                .unwrap_or(false)
+        }
+    }
+
+    /// Logs go to the terminal, or to `%LOCALAPPDATA%\opendisplay\receiver.log`
+    /// when there is none.
+    fn init_logging(to_file: bool) -> Option<std::path::PathBuf> {
+        let filter =
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+        if to_file {
+            let dir = std::env::var_os("LOCALAPPDATA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)
+                .join("opendisplay");
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join("receiver.log");
+            if let Ok(file) = std::fs::File::create(&path) {
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_target(false)
+                    .with_ansi(false)
+                    .with_writer(std::sync::Mutex::new(file))
+                    .init();
+                return Some(path);
+            }
+        }
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .init();
+        None
+    }
+
+    fn message_box(text: &str) {
+        use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+        use windows::core::HSTRING;
+        unsafe {
+            MessageBoxW(
+                None,
+                &HSTRING::from(text),
+                &HSTRING::from("OpenDisplay Receiver"),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+
+    fn main() -> Result<()> {
         use windows::Win32::UI::HiDpi::{
             DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
         };
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "info".into()),
-            )
-            .with_target(false)
-            .init();
         let a = Args::parse();
         // Physical pixels everywhere: the panel size in `hello`, the video
         // rect and the pointer all depend on it.

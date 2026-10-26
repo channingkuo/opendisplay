@@ -117,6 +117,14 @@ impl VideoOutput for WinVideo {
                         .push(started.elapsed().as_secs_f64() * 1000.0);
                 }
                 Err(e) => {
+                    warn!("present failed: {e:#}");
+                    if self.hardware && self.rendered == 0 {
+                        // Maybe the GPU surfaces are the problem: try the
+                        // software decoder, which uploads its own texture.
+                        warn!("falling back to software decode");
+                        self.hardware = false;
+                        self.decoder = None;
+                    }
                     self.pending_error = Some(format!("{e:#}"));
                     return Err(e);
                 }

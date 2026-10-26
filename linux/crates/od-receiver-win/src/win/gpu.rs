@@ -96,6 +96,15 @@ struct Source {
     staging: Option<ID3D11Texture2D>,
 }
 
+/// The picture the video processor reads: a decoder surface (used in place,
+/// before the next picture is decoded) or our own upload texture.
+struct Frame {
+    texture: ID3D11Texture2D,
+    slice: u32,
+    /// Texture size (the decoder pads to whole macroblocks).
+    size: (u32, u32),
+}
+
 struct Processor {
     enumerator: ID3D11VideoProcessorEnumerator,
     processor: ID3D11VideoProcessor,
@@ -110,6 +119,7 @@ pub struct Presenter {
     size: (u32, u32),
     target: Option<Target>,
     source: Option<Source>,
+    frame: Option<Frame>,
     processor: Option<Processor>,
     /// Visible part of the source texture and how to read its colours.
     display: (u32, u32),
@@ -159,6 +169,7 @@ impl Presenter {
             size,
             target: None,
             source: None,
+            frame: None,
             processor: None,
             display: (0, 0),
             color: Color {
@@ -195,7 +206,7 @@ impl Presenter {
 
     /// Input size the video processor is built for: the texture it reads.
     fn proc_input(&self) -> (u32, u32) {
-        self.source.as_ref().map(|s| s.size).unwrap_or(self.display)
+        self.frame.as_ref().map(|f| f.size).unwrap_or(self.display)
     }
 
     /// Make sure the back-buffer views exist (and the processor they belong to).
@@ -211,18 +222,17 @@ impl Presenter {
         unsafe {
             self.gpu
                 .device
-                .CreateRenderTargetView(&back, None, Some(&mut render))?;
+                .CreateRenderTargetView(&back, None, Some(&mut render))
+                .context("creating the back buffer render target view")?;
             let p = self.processor.as_ref().expect("ensured");
             let desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
                 ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
                 ..Default::default()
             };
-            self.gpu.video_device.CreateVideoProcessorOutputView(
-                &back,
-                &p.enumerator,
-                &desc,
-                Some(&mut output),
-            )?;
+            self.gpu
+                .video_device
+                .CreateVideoProcessorOutputView(&back, &p.enumerator, &desc, Some(&mut output))
+                .context("creating the video processor output view")?;
         }
         self.target = Some(Target {
             render: render.ok_or_else(|| anyhow!("no render target view"))?,
@@ -326,90 +336,85 @@ impl Presenter {
 
     /// Show a decoded picture.
     pub fn present(&mut self, pic: &Picture) -> Result<()> {
-        self.upload(pic)?;
-        self.display = (pic.width, pic.height);
-        self.color = pic.color;
-        self.has_frame = true;
-        self.blit()
-    }
-
-    /// Copy the picture into a texture of ours: decoder surfaces are recycled
-    /// as soon as the next picture is decoded.
-    fn upload(&mut self, pic: &Picture) -> Result<()> {
-        match &pic.data {
+        let frame = match &pic.data {
             PictureData::Gpu {
                 texture,
                 subresource,
             } => {
+                // Read the decoder's surface in place: it is only recycled
+                // by the next ProcessOutput, after this blit.
                 let mut d = D3D11_TEXTURE2D_DESC::default();
                 unsafe { texture.GetDesc(&mut d) };
-                let (dst, _) = self.source_for((d.Width, d.Height), false)?;
-                unsafe {
-                    self.gpu.context.CopySubresourceRegion(
-                        &dst,
-                        0,
-                        0,
-                        0,
-                        0,
-                        texture,
-                        *subresource,
-                        None,
-                    );
+                Frame {
+                    texture: texture.clone(),
+                    slice: *subresource,
+                    size: (d.Width, d.Height),
                 }
             }
             PictureData::Cpu {
                 bytes,
                 stride,
                 rows,
-            } => {
-                // Coded size: rows may be padded to whole macroblocks.
-                let coded = (
-                    (*stride as u32).max(pic.width),
-                    (*rows as u32).max(pic.height),
-                );
-                let (dst, staging) = self.source_for(coded, true)?;
-                let staging = staging.expect("created for the CPU path");
-                unsafe {
-                    let mut m = D3D11_MAPPED_SUBRESOURCE::default();
-                    self.gpu
-                        .context
-                        .Map(&staging, 0, D3D11_MAP_WRITE, 0, Some(&mut m))
-                        .context("mapping the upload texture")?;
-                    let out = m.pData as *mut u8;
-                    let pitch = m.RowPitch as usize;
-                    let (w, h) = (coded.0 as usize, coded.1 as usize);
-                    let copy = w.min(*stride).min(pitch);
-                    // Y plane, then interleaved UV at half the rows. The
-                    // staging texture lays the UV plane out right after the
-                    // Y plane, `pitch * height` bytes in.
-                    for y in 0..h {
-                        if (y + 1) * stride > bytes.len() {
-                            break;
-                        }
-                        std::ptr::copy_nonoverlapping(
-                            bytes.as_ptr().add(y * stride),
-                            out.add(y * pitch),
-                            copy,
-                        );
-                    }
-                    let uv_src = stride * rows;
-                    for y in 0..h / 2 {
-                        let from = uv_src + y * stride;
-                        if from + copy > bytes.len() {
-                            break;
-                        }
-                        std::ptr::copy_nonoverlapping(
-                            bytes.as_ptr().add(from),
-                            out.add((h + y) * pitch),
-                            copy,
-                        );
-                    }
-                    self.gpu.context.Unmap(&staging, 0);
-                    self.gpu.context.CopyResource(&dst, &staging);
+            } => self.upload(pic, bytes, *stride, *rows)?,
+        };
+        self.frame = Some(frame);
+        self.display = (pic.width, pic.height);
+        self.color = pic.color;
+        self.has_frame = true;
+        self.blit()
+    }
+
+    /// Software-decoded NV12 into a texture of ours.
+    fn upload(&mut self, pic: &Picture, bytes: &[u8], stride: usize, rows: usize) -> Result<Frame> {
+        // Coded size: rows may be padded to whole macroblocks.
+        let coded = (
+            (stride as u32).max(pic.width),
+            (rows as u32).max(pic.height),
+        );
+        let (dst, staging) = self.source_for(coded, true)?;
+        let staging = staging.expect("created for the CPU path");
+        unsafe {
+            let mut m = D3D11_MAPPED_SUBRESOURCE::default();
+            self.gpu
+                .context
+                .Map(&staging, 0, D3D11_MAP_WRITE, 0, Some(&mut m))
+                .context("mapping the upload texture")?;
+            let out = m.pData as *mut u8;
+            let pitch = m.RowPitch as usize;
+            let (w, h) = ((coded.0 & !1) as usize, (coded.1 & !1) as usize);
+            let copy = w.min(stride).min(pitch);
+            // Y plane, then interleaved UV at half the rows: the staging
+            // texture lays the UV plane out right after the Y plane.
+            for y in 0..h {
+                if (y + 1) * stride > bytes.len() {
+                    break;
                 }
+                std::ptr::copy_nonoverlapping(
+                    bytes.as_ptr().add(y * stride),
+                    out.add(y * pitch),
+                    copy,
+                );
             }
+            let uv_src = stride * rows;
+            for y in 0..h / 2 {
+                let from = uv_src + y * stride;
+                if from + copy > bytes.len() {
+                    break;
+                }
+                std::ptr::copy_nonoverlapping(
+                    bytes.as_ptr().add(from),
+                    out.add((h + y) * pitch),
+                    copy,
+                );
+            }
+            self.gpu.context.Unmap(&staging, 0);
+            self.gpu.context.CopyResource(&dst, &staging);
         }
-        Ok(())
+        Ok(Frame {
+            texture: dst,
+            slice: 0,
+            size: (coded.0 & !1, coded.1 & !1),
+        })
     }
 
     fn source_for(
@@ -475,7 +480,7 @@ impl Presenter {
             return self.clear();
         };
         self.ensure_target()?;
-        let source = self.source.as_ref().expect("a frame was uploaded");
+        let frame = self.frame.as_ref().expect("a frame was set");
         let p = self.processor.as_ref().expect("ensured");
         let t = self.target.as_ref().expect("ensured");
 
@@ -486,17 +491,25 @@ impl Presenter {
             Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
                 Texture2D: D3D11_TEX2D_VPIV {
                     MipSlice: 0,
-                    ArraySlice: 0,
+                    ArraySlice: frame.slice,
                 },
             },
         };
         unsafe {
+            let mut d = D3D11_TEXTURE2D_DESC::default();
+            frame.texture.GetDesc(&mut d);
             self.gpu.video_device.CreateVideoProcessorInputView(
-                &source.texture,
+                &frame.texture,
                 &p.enumerator,
                 &in_desc,
                 Some(&mut view),
-            )?;
+            )
+            .with_context(|| {
+                format!(
+                    "creating the video processor input view (texture {}x{} format {} array {} slice {} bind {:#x})",
+                    d.Width, d.Height, d.Format.0, d.ArraySize, frame.slice, d.BindFlags
+                )
+            })?;
         }
         let view = view.ok_or_else(|| anyhow!("no input view"))?;
 

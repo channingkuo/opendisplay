@@ -125,6 +125,8 @@ pub struct Presenter {
     display: (u32, u32),
     color: Color,
     has_frame: bool,
+    /// Showing the idle screen (redrawn when the window resizes).
+    idle: bool,
 }
 
 /// The back buffer and the views onto it; rebuilt when the window resizes.
@@ -177,6 +179,7 @@ impl Presenter {
                 full_range: false,
             },
             has_frame: false,
+            idle: false,
         };
         p.clear()?;
         Ok(p)
@@ -316,6 +319,8 @@ impl Presenter {
         self.size = size;
         if self.has_frame {
             self.blit()
+        } else if self.idle {
+            self.show_idle()
         } else {
             self.clear()
         }
@@ -326,7 +331,43 @@ impl Presenter {
         self.frame = None;
         self.display = (0, 0);
         self.has_frame = false;
-        self.clear()
+        self.idle = true;
+        let Some(bytes) = super::idle::render(self.size) else {
+            return self.clear();
+        };
+        self.ensure_target()?;
+        let data = D3D11_SUBRESOURCE_DATA {
+            pSysMem: bytes.as_ptr() as *const _,
+            SysMemPitch: self.size.0 * 4,
+            SysMemSlicePitch: 0,
+        };
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: self.size.0,
+            Height: self.size.1,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_IMMUTABLE,
+            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+            ..Default::default()
+        };
+        let mut image = None;
+        unsafe {
+            self.gpu
+                .device
+                .CreateTexture2D(&desc, Some(&data), Some(&mut image))
+                .context("creating the idle screen texture")?;
+            let back: ID3D11Texture2D = self.swap.GetBuffer(0).context("back buffer")?;
+            self.gpu
+                .context
+                .CopyResource(&back, &image.ok_or_else(|| anyhow!("no texture"))?);
+            self.swap.Present(0, DXGI_PRESENT(0)).ok()?;
+        }
+        Ok(())
     }
 
     /// Paint the window black.
@@ -369,6 +410,7 @@ impl Presenter {
         self.display = (pic.width, pic.height);
         self.color = pic.color;
         self.has_frame = true;
+        self.idle = false;
         self.blit()
     }
 

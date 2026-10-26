@@ -2,6 +2,7 @@
 
 mod decoder;
 mod gpu;
+mod idle;
 mod monitors;
 mod pointer;
 pub mod window;

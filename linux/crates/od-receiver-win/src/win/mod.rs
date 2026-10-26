@@ -12,7 +12,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use od_receiver::video::VideoOutput;
 use opendisplay_proto::control::CursorImg;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use windows::Win32::Media::MediaFoundation::{MF_VERSION, MFSTARTUP_FULL, MFStartup};
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 
@@ -156,13 +156,16 @@ impl VideoOutput for WinVideo {
         std::mem::take(&mut self.decode_ms)
     }
 
-    fn cursor(&mut self, _x: Option<f64>, _y: Option<f64>, visible: bool) {
-        self.shared.set_cursor_visible(visible);
+    fn cursor(&mut self, x: Option<f64>, y: Option<f64>, visible: bool) {
+        self.shared.set_cursor(x, y, visible);
     }
 
     fn cursor_image(&mut self, img: &CursorImg) {
         match crate::sprite::decode(img) {
-            Ok(s) => self.shared.set_sprite(s),
+            Ok(s) => {
+                debug!("cursor sprite {}x{}", s.width, s.height);
+                self.shared.set_sprite(s)
+            }
             Err(e) => warn!("cursor sprite: {e:#}"),
         }
     }

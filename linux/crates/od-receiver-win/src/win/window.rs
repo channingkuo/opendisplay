@@ -6,7 +6,7 @@
 //! receiver loop lives on another thread and reaches it through [`Shared`]
 //! and `PostMessage`.
 
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
 use super::gpu::Presenter;
-use super::pointer::{self, Pointer};
+use super::pointer;
 use crate::sprite::Sprite;
 
 /// Posted by the receiver thread: the sender's cursor sprite or visibility
@@ -41,7 +41,13 @@ pub struct Shared {
     pub presenter: Mutex<Presenter>,
     hwnd: AtomicIsize,
     cursor: Mutex<Option<Sprite>>,
+    /// Bumped on every new sprite.
+    sprite_gen: AtomicU64,
+    /// Last reported cursor position, normalised to the video.
+    cursor_pos: Mutex<Option<(f64, f64)>>,
     cursor_visible: AtomicBool,
+    /// A `WM_OD_CURSOR` is already queued: coalesce the 120 Hz updates.
+    cursor_dirty: AtomicBool,
 }
 
 // The presenter's Direct3D objects are free-threaded and only used under the
@@ -55,7 +61,10 @@ impl Shared {
             presenter: Mutex::new(presenter),
             hwnd: AtomicIsize::new(0),
             cursor: Mutex::new(None),
+            sprite_gen: AtomicU64::new(0),
+            cursor_pos: Mutex::new(None),
             cursor_visible: AtomicBool::new(true),
+            cursor_dirty: AtomicBool::new(false),
         })
     }
 
@@ -66,19 +75,23 @@ impl Shared {
     /// New cursor sprite (receiver thread).
     pub fn set_sprite(&self, s: Sprite) {
         *self.cursor.lock().unwrap() = Some(s);
+        self.sprite_gen.fetch_add(1, Ordering::AcqRel);
         self.notify_cursor();
     }
 
-    /// Cursor shown or hidden (receiver thread). Positions are ignored: the
-    /// pointer over the window *is* the sender's pointer, since the sender
-    /// follows every move we report.
-    pub fn set_cursor_visible(&self, visible: bool) {
-        if self.cursor_visible.swap(visible, Ordering::AcqRel) != visible {
-            self.notify_cursor();
+    /// The sender's cursor moved or was shown/hidden (receiver thread).
+    pub fn set_cursor(&self, x: Option<f64>, y: Option<f64>, visible: bool) {
+        if let (Some(x), Some(y)) = (x, y) {
+            *self.cursor_pos.lock().unwrap() = Some((x, y));
         }
+        self.cursor_visible.store(visible, Ordering::Release);
+        self.notify_cursor();
     }
 
     fn notify_cursor(&self) {
+        if self.cursor_dirty.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let h = self.hwnd();
         if !h.0.is_null() {
             unsafe {
@@ -115,9 +128,13 @@ struct State {
     pending_move: Option<(i32, i32)>,
     /// The windowed state to return to from fullscreen.
     fullscreen: Option<Saved>,
-    pointer: Option<Pointer>,
-    /// The video size `pointer` was rendered for.
-    pointer_for: (u32, u32),
+    overlay: Option<HWND>,
+    overlay_shown: bool,
+    image: Option<pointer::Image>,
+    /// What `image` was rendered from: sprite generation and video size.
+    image_for: (u64, (u32, u32)),
+    sprite: Option<Sprite>,
+    sprite_gen: u64,
 }
 
 struct Saved {
@@ -155,8 +172,12 @@ pub fn create(
             pressed: false,
             pending_move: None,
             fullscreen: None,
-            pointer: None,
-            pointer_for: (0, 0),
+            overlay: None,
+            overlay_shown: false,
+            image: None,
+            image_for: (0, (0, 0)),
+            sprite: None,
+            sprite_gen: 0,
         }));
         let (style, x, y, w, h) = if opts.windowed {
             (
@@ -189,6 +210,7 @@ pub fn create(
             Some(hinstance.into()),
             Some(state as *const _),
         )?;
+        (*state).overlay = pointer::create_window(hwnd);
         if !opts.windowed {
             (*state).fullscreen = Some(Saved {
                 style: WS_OVERLAPPEDWINDOW.0 as isize,
@@ -311,9 +333,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             warn!("resize: {e:#}");
                         }
                     }
-                    refresh_pointer(st, hwnd);
                 }
+                update_overlay(st, hwnd);
                 return LRESULT(0);
+            }
+            WM_MOVE | WM_SHOWWINDOW => {
+                update_overlay(st, hwnd);
             }
             WM_MOUSEMOVE => {
                 st.pending_move = Some(xy(lp));
@@ -370,12 +395,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_SETCURSOR => {
                 if (lp.0 & 0xFFFF) as u32 == HTCLIENT {
-                    apply_pointer(st);
+                    // The sender's cursor is drawn by the overlay; hide ours
+                    // once there is one to show instead.
+                    if st.sprite.is_some() {
+                        SetCursor(None);
+                    } else if let Ok(arrow) = LoadCursorW(None, IDC_ARROW) {
+                        SetCursor(Some(arrow));
+                    }
                     return LRESULT(1);
                 }
             }
             WM_OD_CURSOR => {
-                refresh_pointer(st, hwnd);
+                if let Some(shared) = &st.shared {
+                    shared.cursor_dirty.store(false, Ordering::Release);
+                }
+                update_overlay(st, hwnd);
                 return LRESULT(0);
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -493,44 +527,57 @@ fn toggle_fullscreen(hwnd: HWND, st: &mut State) {
     }
 }
 
-/// Rebuild the pointer for the current sprite and video size, and show it if
-/// the mouse is over the window.
-fn refresh_pointer(st: &mut State, hwnd: HWND) {
-    let Some(shared) = st.shared.clone() else {
+/// Draw the sender's cursor where it says it is, or hide it.
+fn update_overlay(st: &mut State, hwnd: HWND) {
+    let (Some(shared), Some(overlay)) = (st.shared.clone(), st.overlay) else {
         return;
     };
+    let hide = |st: &mut State| {
+        if st.overlay_shown {
+            st.overlay_shown = false;
+            unsafe {
+                let _ = ShowWindow(overlay, SW_HIDE);
+            }
+        }
+    };
+    let gen_now = shared.sprite_gen.load(Ordering::Acquire);
+    if gen_now != st.sprite_gen {
+        st.sprite = shared.cursor.lock().unwrap().clone();
+        st.sprite_gen = gen_now;
+    }
+    let pos = *shared.cursor_pos.lock().unwrap();
     let rect = shared.presenter.lock().unwrap().video_rect();
-    let sprite = shared.cursor.lock().unwrap().clone();
-    if let (Some(rect), Some(sprite)) = (rect, sprite) {
-        let for_size = (rect.width.round() as u32, rect.height.round() as u32);
-        let bmp = sprite.render(rect.width, rect.height);
-        st.pointer = pointer::create(&bmp);
-        st.pointer_for = for_size;
-        if st.pointer.is_none() {
-            debug!("could not build a pointer from the cursor sprite");
+    let shown = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() };
+    let (Some(sprite), Some((x, y)), Some(rect)) = (&st.sprite, pos, rect) else {
+        return hide(st);
+    };
+    if !shared.cursor_visible.load(Ordering::Acquire) || !shown {
+        return hide(st);
+    }
+    let size = (rect.width.round() as u32, rect.height.round() as u32);
+    if st.image.is_none() || st.image_for != (gen_now, size) {
+        st.image = pointer::Image::new(&sprite.render(rect.width, rect.height));
+        st.image_for = (gen_now, size);
+        if st.image.is_none() {
+            debug!("could not build the cursor image");
         }
     }
+    let Some(image) = &st.image else {
+        return hide(st);
+    };
+    let (px, py) = rect.point(x, y);
+    let mut at = POINT {
+        x: px.round() as i32,
+        y: py.round() as i32,
+    };
     unsafe {
-        let mut p = POINT::default();
-        if GetCursorPos(&mut p).is_ok() && WindowFromPoint(p) == hwnd {
-            apply_pointer(st);
-        }
+        let _ = ClientToScreen(hwnd, &mut at);
     }
-}
-
-fn apply_pointer(st: &State) {
-    let visible = st
-        .shared
-        .as_ref()
-        .map(|s| s.cursor_visible.load(Ordering::Acquire))
-        .unwrap_or(true);
-    unsafe {
-        if !visible {
-            SetCursor(None);
-        } else if let Some(p) = &st.pointer {
-            SetCursor(Some(p.0));
-        } else if let Ok(arrow) = LoadCursorW(None, IDC_ARROW) {
-            SetCursor(Some(arrow));
+    image.place(overlay, at);
+    if !st.overlay_shown {
+        st.overlay_shown = true;
+        unsafe {
+            let _ = ShowWindow(overlay, SW_SHOWNOACTIVATE);
         }
     }
 }

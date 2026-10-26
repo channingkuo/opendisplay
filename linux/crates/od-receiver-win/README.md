@@ -32,7 +32,7 @@ stream is **not encrypted**: use it on a network you trust.
 3. On the Mac, pick the PC in the OpenDisplay menu. The virtual display appears
    as a second monitor sized for this PC's screen.
 4. Click and drag on the PC's window to click and drag on the Mac; the mouse
-   wheel / touchpad scrolls. The pointer you see is the Mac's.
+   wheel / touchpad scrolls. The pointer you see is the Mac's, drawn where the Mac says it is, so it also moves when you use the Mac's own mouse.
 
 Keys: **F11** or **Alt+Enter** toggles fullscreen, **Esc** leaves fullscreen,
 **Alt+F4** or closing the window quits (the sender is told).
@@ -71,7 +71,7 @@ netsh advfirewall firewall add rule name="OpenDisplay Receiver (mDNS)" dir=in ac
 | Decode | `CLSID_CMSH264DecoderMFT` with a DXGI device manager (DXVA), low-latency mode, NV12 out; software fallback |
 | Present | D3D11 video processor (NV12 to RGB, scale, letterbox) into a flip-model swap chain, no vsync wait |
 | Colours | BT.709/BT.601 and range taken from the decoder's output type (the SPS VUI) |
-| Cursor | the sender's sprite is turned into the window's own pointer (`CreateIconIndirect`), so it follows the mouse with no extra latency |
+| Cursor | the sender's sprite is drawn at the position the sender reports, in a transparent click-through overlay window (per-pixel alpha); the local pointer is hidden over the window |
 
 Panel facts in `hello` come from the monitor: physical pixels, DPI scale
 (`GetDpiForMonitor`) and refresh rate. Only H.264 is offered; HEVC would need
@@ -93,5 +93,5 @@ x86_64-pc-windows-msvc -p od-receiver-win` works from Linux and macOS too.
 * H.264 only; no HEVC, no audio, no Apple Pencil pressure (a plain pointer).
 * Only the left mouse button is sent (as touch); right click / keyboard are not forwarded.
 * After a GPU reset or driver update the receiver must be restarted.
-* The sender's cursor *position* is not drawn separately: the pointer shown is
-  the sender's sprite at your mouse position (the sender follows your mouse).
+* The cursor is a separate overlay window, so a capture of the PC's screen
+  (or a window manager that hides topmost tool windows) may not include it.

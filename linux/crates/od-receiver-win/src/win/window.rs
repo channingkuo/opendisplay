@@ -126,6 +126,11 @@ struct State {
     on_close: Box<dyn Fn()>,
     pressed: bool,
     pending_move: Option<(i32, i32)>,
+    /// Where the real mouse last was. Windows re-sends `WM_MOUSEMOVE` with
+    /// the same coordinates whenever a window moves under the pointer (our
+    /// cursor overlay does, constantly); treating those as motion would drag
+    /// the sender's cursor back to this spot.
+    last_mouse: Option<(i32, i32)>,
     /// The windowed state to return to from fullscreen.
     fullscreen: Option<Saved>,
     overlay: Option<HWND>,
@@ -171,6 +176,7 @@ pub fn create(
             on_close: Box::new(on_close),
             pressed: false,
             pending_move: None,
+            last_mouse: None,
             fullscreen: None,
             overlay: None,
             overlay_shown: false,
@@ -341,12 +347,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 update_overlay(st, hwnd);
             }
             WM_MOUSEMOVE => {
-                st.pending_move = Some(xy(lp));
+                let p = xy(lp);
+                if st.last_mouse != Some(p) {
+                    st.last_mouse = Some(p);
+                    st.pending_move = Some(p);
+                }
                 return LRESULT(0);
             }
             WM_LBUTTONDOWN => {
                 flush_move(st, hwnd);
                 let (x, y) = xy(lp);
+                st.last_mouse = Some((x, y));
                 st.pressed = true;
                 SetCapture(hwnd);
                 touch(st, TouchPhase::Began, x, y);
@@ -355,6 +366,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WM_LBUTTONUP => {
                 flush_move(st, hwnd);
                 let (x, y) = xy(lp);
+                st.last_mouse = Some((x, y));
                 if st.pressed {
                     st.pressed = false;
                     let _ = ReleaseCapture();

@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod gtk_ui;
 pub mod id;
 pub mod input;
+#[cfg(unix)]
 pub mod outputs;
 pub mod power;
 pub mod stats;

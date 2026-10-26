@@ -28,12 +28,16 @@ tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 mdns-sd = { workspace = true }
-wayland-client = { workspace = true }
 gstreamer = { workspace = true, optional = true }
 gstreamer-app = { workspace = true, optional = true }
 gtk4 = { workspace = true, optional = true }
 gst-plugin-gtk4 = { workspace = true, optional = true }
 zbus = { workspace = true, optional = true }
+
+# Wayland output enumeration is Linux-only; the Windows receiver
+# (`od-receiver-win`) builds this crate as a library without it.
+[target.'cfg(unix)'.dependencies]
+wayland-client = { workspace = true }
 
 [dev-dependencies]
 od-fake-sender = { path = "../od-fake-sender" }

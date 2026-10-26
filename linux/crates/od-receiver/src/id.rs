@@ -1,11 +1,19 @@
 //! Stable per-install identity (§2.1, §6.1): the same UUID in the Bonjour TXT
-//! record and in `hello.id`, persisted under `$XDG_STATE_HOME/opendisplay/id`.
+//! record and in `hello.id`, persisted under `$XDG_STATE_HOME/opendisplay/id`
+//! (`%LOCALAPPDATA%\opendisplay\id` on Windows).
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
 fn state_dir() -> PathBuf {
+    if cfg!(windows) {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .or_else(|| std::env::var_os("APPDATA"))
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        return base.join("opendisplay");
+    }
     if let Some(p) = std::env::var_os("XDG_STATE_HOME") {
         return PathBuf::from(p).join("opendisplay");
     }

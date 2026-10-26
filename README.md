@@ -309,6 +309,14 @@ Omarchy, build its package from this repository with `makepkg -si`; see
 [linux/README.md#linux-receiver-beta](linux/README.md#linux-receiver-beta).
 Reports go to [#284](https://github.com/peetzweg/opendisplay/issues/284).
 
+### Windows receiver (beta)
+
+`od-receiver-win.exe` turns a Windows PC's screen into the display for a Mac
+sender, as a single `.exe` (Media Foundation H.264 decode on the GPU, Direct3D 11
+presentation, no codecs to install). It shares its network and protocol
+code with the Linux receiver. Build, firewall and usage notes:
+[linux/crates/od-receiver-win/README.md](linux/crates/od-receiver-win/README.md).
+
 ## Third-party projects
 
 OpenDisplay's own apps cover the Mac and Linux senders and receivers for

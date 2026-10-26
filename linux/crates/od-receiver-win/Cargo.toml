@@ -1,0 +1,45 @@
+[package]
+name = "od-receiver-win"
+description = "OpenDisplay receiver for Windows: Media Foundation H.264 decode, Direct3D 11 presentation (PROTOCOL.md pv 3)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "od-receiver-win"
+path = "src/main.rs"
+
+# Everything platform specific is behind `cfg(windows)`, so the workspace still
+# builds (to a stub binary) on Linux and macOS and the portable parts are
+# unit-tested there.
+[dependencies]
+opendisplay-proto = { workspace = true }
+od-receiver = { path = "../od-receiver", default-features = false }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+png = { workspace = true }
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Power",
+    "Win32_System_Variant",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

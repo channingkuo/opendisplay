@@ -1,0 +1,66 @@
+name: Windows
+
+# The Windows receiver (linux/crates/od-receiver-win) needs the Windows SDK
+# APIs it wraps (Media Foundation, Direct3D 11), so it is built and linted on
+# a Windows runner. The portable parts also run in linux.yml's workspace test.
+on:
+  pull_request:
+    paths:
+      - "linux/crates/od-receiver-win/**"
+      - "linux/crates/od-receiver/**"
+      - "linux/crates/opendisplay-proto/**"
+      - "linux/crates/opendisplay-session/**"
+      - "linux/Cargo.*"
+      - "PROTOCOL.md"
+      - ".github/workflows/windows.yml"
+  push:
+    branches: [main]
+    paths:
+      - "linux/crates/od-receiver-win/**"
+      - "linux/crates/od-receiver/**"
+      - "linux/Cargo.*"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  receiver:
+    name: receiver (x86_64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: linux
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: linux
+
+      # Only the receiver and the crates it uses: the workspace's Linux
+      # crates (GStreamer, PipeWire, Wayland) do not build here.
+      - name: Clippy
+        run: cargo clippy --locked -p od-receiver-win --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked -p od-receiver-win -p opendisplay-proto -p opendisplay-session
+
+      - name: Build
+        run: cargo build --locked --release -p od-receiver-win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: od-receiver-win-x86_64
+          path: linux/target/release/od-receiver-win.exe
+          if-no-files-found: error

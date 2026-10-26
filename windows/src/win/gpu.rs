@@ -321,6 +321,14 @@ impl Presenter {
         }
     }
 
+    /// Drop the last picture and show the idle screen (the sender is gone).
+    pub fn show_idle(&mut self) -> Result<()> {
+        self.frame = None;
+        self.display = (0, 0);
+        self.has_frame = false;
+        self.clear()
+    }
+
     /// Paint the window black.
     pub fn clear(&mut self) -> Result<()> {
         self.ensure_target()?;

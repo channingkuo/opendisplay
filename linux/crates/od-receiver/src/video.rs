@@ -101,6 +101,9 @@ pub trait VideoOutput: Send {
     fn cursor(&mut self, _x: Option<f64>, _y: Option<f64>, _visible: bool) {}
     /// The sender's cursor sprite changed.
     fn cursor_image(&mut self, _img: &opendisplay_proto::control::CursorImg) {}
+    /// The sender went away (closed, dropped or the receiver is sleeping):
+    /// presenters may replace the last picture with an idle screen.
+    fn disconnected(&mut self) {}
 }
 
 /// Counts frames and does nothing else.

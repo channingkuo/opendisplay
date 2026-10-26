@@ -190,6 +190,7 @@ impl Receiver {
                         Ok(0) | Err(_) => {
                             info!("sender {} disconnected", peer.map(|p| p.to_string()).unwrap_or_default());
                             current = None;
+                            self.video.disconnected();
                             sess.handle(now(start), ReceiverEvent::Disconnected)
                         }
                         Ok(n) => sess.handle(now(start), ReceiverEvent::Bytes(&buf[..n])),
@@ -207,6 +208,7 @@ impl Receiver {
                         }
                         current = None;
                         peer = None;
+                        self.video.disconnected();
                         sess.handle(now(start), ReceiverEvent::Disconnected);
                     }
                     if let Some(done) = done {
@@ -280,6 +282,7 @@ impl Receiver {
                             if let Err(e) = s.write_all(&bytes).await {
                                 warn!("write to sender failed: {e}");
                                 current = None;
+                                self.video.disconnected();
                                 sess.handle(now(start), ReceiverEvent::Disconnected);
                             }
                         }

@@ -160,6 +160,16 @@ impl VideoOutput for WinVideo {
         self.shared.set_cursor(x, y, visible);
     }
 
+    fn disconnected(&mut self) {
+        // Nothing more is coming: forget the decoder state and the sender's
+        // cursor, and replace the frozen last picture with the idle screen.
+        self.decoder = None;
+        self.shared.set_cursor(None, None, false);
+        if let Err(e) = self.shared.presenter.lock().unwrap().show_idle() {
+            warn!("idle screen: {e:#}");
+        }
+    }
+
     fn cursor_image(&mut self, img: &CursorImg) {
         match crate::sprite::decode(img) {
             Ok(s) => {

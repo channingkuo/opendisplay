@@ -21,6 +21,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Power::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
@@ -111,6 +112,9 @@ impl Shared {
     }
 }
 
+/// Client size of the window at startup (physical pixels).
+const DEFAULT_CLIENT: (i32, i32) = (1920, 1080);
+
 pub struct WindowOptions {
     /// Top-left and size of the monitor to cover when fullscreen.
     pub monitor_origin: (i32, i32),
@@ -191,12 +195,33 @@ pub fn create(
             sprite_gen: 0,
         }));
         let (style, x, y, w, h) = if opts.windowed {
+            // A DEFAULT_CLIENT-sized client area, shrunk to fit small
+            // monitors, centred on the chosen monitor.
+            let (mw, mh) = (opts.monitor_size.0 as i32, opts.monitor_size.1 as i32);
+            let client = (
+                DEFAULT_CLIENT.0.min(mw * 9 / 10),
+                DEFAULT_CLIENT.1.min(mh * 9 / 10),
+            );
+            let mut r = RECT {
+                left: 0,
+                top: 0,
+                right: client.0,
+                bottom: client.1,
+            };
+            let _ = AdjustWindowRectExForDpi(
+                &mut r,
+                WS_OVERLAPPEDWINDOW,
+                false,
+                WINDOW_EX_STYLE(0),
+                GetDpiForSystem(),
+            );
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
             (
                 WS_OVERLAPPEDWINDOW,
-                opts.monitor_origin.0 + 80,
-                opts.monitor_origin.1 + 80,
-                (opts.monitor_size.0 * 3 / 4) as i32,
-                (opts.monitor_size.1 * 3 / 4) as i32,
+                opts.monitor_origin.0 + (mw - w) / 2,
+                opts.monitor_origin.1 + (mh - h) / 2,
+                w,
+                h,
             )
         } else {
             (
@@ -432,7 +457,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = VIRTUAL_KEY(wp.0 as u16);
                 let alt = msg == WM_SYSKEYDOWN;
-                if vk == VK_F11 || (alt && vk == VK_RETURN) {
+                let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
+                if vk == VK_F11 || (alt && vk == VK_RETURN) || (ctrl && vk == VK_F) {
                     toggle_fullscreen(hwnd, st);
                     return LRESULT(0);
                 }

@@ -70,8 +70,12 @@ mod app {
         /// Override `hello.displayMaxFrameRate` (else the monitor's refresh).
         #[arg(long)]
         refresh: Option<u32>,
-        /// Present in a normal window instead of fullscreen (F11 toggles).
+        /// Start fullscreen on the monitor instead of in a 1920x1080 window
+        /// (F11, Alt+Enter or Ctrl+F toggles; Esc leaves fullscreen).
         #[arg(long)]
+        fullscreen: bool,
+        /// Kept for old scripts: windowed is the default.
+        #[arg(long, hide = true)]
         windowed: bool,
         /// Decode on the CPU even when the GPU can decode H.264.
         #[arg(long)]
@@ -245,7 +249,7 @@ mod app {
             &win::WindowOptions {
                 monitor_origin: origin,
                 monitor_size: size,
-                windowed: a.windowed,
+                windowed: !a.fullscreen,
             },
             input_tx,
             power_tx,

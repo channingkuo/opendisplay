@@ -181,7 +181,7 @@ impl Presenter {
             has_frame: false,
             idle: false,
         };
-        p.clear()?;
+        p.show_idle()?;
         Ok(p)
     }
 

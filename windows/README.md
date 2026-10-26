@@ -40,13 +40,15 @@ message box); started from a terminal it prints the log there, so
 4. Click and drag on the PC's window to click and drag on the Mac; the mouse
    wheel / touchpad scrolls. The pointer you see is the Mac's, drawn where the Mac says it is, so it also moves when you use the Mac's own mouse.
 
-Keys: **F11** or **Alt+Enter** toggles fullscreen, **Esc** leaves fullscreen,
+The receiver opens in a 1920x1080 window (smaller on small monitors) showing
+"waiting for connection" until a Mac connects. Keys: **F11**, **Ctrl+F** or
+**Alt+Enter** toggles fullscreen, **Esc** leaves fullscreen,
 **Alt+F4** or closing the window quits (the sender is told).
 
 ```
 "OpenDisplay Receiver.exe" --list-monitors        # what Windows reports
 "OpenDisplay Receiver.exe" --monitor 2            # cover the second monitor (or --monitor \\.\DISPLAY2)
-"OpenDisplay Receiver.exe" --windowed             # a normal window instead of fullscreen
+"OpenDisplay Receiver.exe" --fullscreen           # start fullscreen instead of in a window
 "OpenDisplay Receiver.exe" --software-decode      # never use the GPU decoder
 "OpenDisplay Receiver.exe" --name "Desk PC"       # name shown in the sender's list
 "OpenDisplay Receiver.exe" --listen 0.0.0.0:9000  # port (the cursor channel uses port+1)
